@@ -1,0 +1,40 @@
+server {
+    listen 80;
+    listen [::]:80;
+
+    # Serve the static frontend page
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+
+    # Proxy API calls to the backend service
+    location /api/ {
+        # Docker's internal DNS resolver — required so Nginx re-resolves
+        # the backend hostname on each request instead of only at startup.
+        resolver 127.0.0.11 valid=10s;
+
+        # Backend target, built from environment variables at container
+        # startup via envsubst (see Dockerfile). No trailing slash here,
+        # since the rewrite below handles the path.
+        set $backend "http://${BACKEND_HOST}:${BACKEND_PORT}";
+
+        # Strip the /api prefix before forwarding.
+        # e.g. /api/health -> /health, /api/bmi -> /bmi
+        rewrite ^/api/(.*)$ /$1 break;
+
+        proxy_pass $backend;
+
+        # Standard proxy headers, useful once you add logging or
+        # multiple backend services later
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Fail fast if the backend is unreachable, rather than hanging
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+    }
+}
